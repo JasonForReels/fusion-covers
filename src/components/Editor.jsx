@@ -80,15 +80,16 @@ export default function Editor({ item, patch, onRemove, onDuplicate, onClose, se
     if (file.size > 4 * 1024 * 1024) toast('Large image — it will be downscaled when rendering.', false)
     const reader = new FileReader()
     reader.onload = () => {
-      // Downscale to keep localStorage small.
+      // Downscale + re-encode to keep local storage and sync small.
       const img = new Image()
       img.onload = () => {
-        const scale = Math.min(1, 1400 / Math.max(img.width, img.height))
+        // Covers render at ≤990px, so 1000px is plenty. WebP keeps synced/stored data small.
+        const scale = Math.min(1, 1000 / Math.max(img.width, img.height))
         const c = document.createElement('canvas')
         c.width = Math.round(img.width * scale)
         c.height = Math.round(img.height * scale)
         c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
-        setD({ bg: 'image', image: c.toDataURL('image/jpeg', 0.88) })
+        setD({ bg: 'image', image: c.toDataURL('image/webp', 0.8) })
       }
       img.src = reader.result
     }

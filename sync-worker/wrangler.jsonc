@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fusion-covers-sync",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "observability": { "enabled": false },
+  "vars": {
+    "SHARD_MAP": "0000000000000000",
+    "ALLOWED_ORIGINS": "https://jasonforreels.github.io,http://localhost:4173,http://localhost:5173"
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "fusion-covers-sync", "database_id": "REPLACE_ON_CREATE" }
+  ],
+  // Purge vaults nobody has touched in a year (keeps the free tier free).
+  "triggers": { "crons": ["17 3 * * *"] }
+}

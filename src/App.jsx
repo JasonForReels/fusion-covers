@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { stampProject, stampSettings } from './lib/merge.js'
+import { useSync } from './lib/useSync.js'
+import SyncDialog, { SyncBadge } from './components/SyncDialog.jsx'
 import { loadProject, saveProject, loadSettings, saveSettings, uid } from './lib/storage.js'
 import { newItem } from './lib/fusion.js'
 import { addonPosters, traktPosters } from './lib/sources.js'
@@ -18,8 +21,12 @@ export default function App() {
 
 function Shell() {
   const toast = useToast()
-  const [project, setProject] = useState(loadProject)
-  const [settings, setSettings] = useState(loadSettings)
+  const [project, setProjectRaw] = useState(loadProject)
+  const [settings, setSettingsRaw] = useState(loadSettings)
+  // Local edits get change timestamps so sync can merge edits from several devices.
+  const setProject = useCallback((u) => setProjectRaw((prev) => stampProject(prev, typeof u === 'function' ? u(prev) : u)), [])
+  const setSettings = useCallback((u) => setSettingsRaw((prev) => stampSettings(prev, typeof u === 'function' ? u(prev) : u)), [])
+  const sync = useSync({ project, settings, setProjectRaw, setSettingsRaw })
   const [selected, setSelected] = useState(null) // { rowId, itemId }
   const [dialog, setDialog] = useState(null)
 
@@ -111,6 +118,7 @@ function Shell() {
           <span className="logo">🎞️</span> <b>Covers</b> <span className="muted">for Fusion · no server, no tracking</span>
         </div>
         <div className="actions">
+          <SyncBadge status={sync.status} connected={!!sync.token} onClick={() => setDialog('sync')} />
           <button className="ghost" onClick={() => setDialog('import')}>Import</button>
           <button className="ghost" onClick={() => setDialog('settings')}>Settings</button>
           <button className="primary" onClick={() => setDialog('publish')}>Publish</button>
@@ -146,11 +154,24 @@ function Shell() {
         )}
       </main>
 
+      {dialog === 'sync' && <SyncDialog sync={sync} onClose={() => setDialog(null)} />}
       {dialog === 'settings' && (
         <SettingsDialog settings={settings} setSettings={setSettings} onClose={() => setDialog(null)} />
       )}
       {dialog === 'publish' && (
-        <PublishDialog project={project} settings={settings} setSettings={setSettings} onClose={() => setDialog(null)} />
+        <PublishDialog
+          project={project}
+          settings={settings}
+          setSettings={setSettings}
+          // Remember each cover's published GitHub URL; other synced devices fall back to it.
+          onPublished={(urlFor) =>
+            setProject((p) => ({
+              ...p,
+              rows: p.rows.map((r) => ({ ...r, items: r.items.map((i) => (urlFor[i.id] ? { ...i, imageURL: urlFor[i.id] } : i)) })),
+            }))
+          }
+          onClose={() => setDialog(null)}
+        />
       )}
       {dialog === 'import' && (
         <ImportDialog

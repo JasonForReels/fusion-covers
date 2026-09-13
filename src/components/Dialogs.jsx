@@ -59,7 +59,7 @@ function CopyUrl({ url }) {
 
 /* ---------------- Publish ---------------- */
 
-export function PublishDialog({ project, settings, setSettings, onClose }) {
+export function PublishDialog({ project, settings, setSettings, onPublished, onClose }) {
   const toast = useToast()
   const [gh, setGh] = useState(settings.github)
   const [token, setToken] = useState(loadToken)
@@ -87,7 +87,8 @@ export function PublishDialog({ project, settings, setSettings, onClose }) {
         append(`Rendering cover ${i + 1}/${items.length}…`)
         images.push({ id: item.id, name: `${item.id.toLowerCase()}.png`, blob: await renderToBlob(item, settings) })
       }
-      const { url } = await publish(gh, token, images, (urlFor) => buildExport(project, urlFor), append)
+      const { url, urlFor } = await publish(gh, token, images, (urlFor) => buildExport(project, urlFor), append)
+      onPublished?.(urlFor)
       setResult(url)
       setSettings((s) => ({ ...s, lastUrl: url }))
     } catch (e) {

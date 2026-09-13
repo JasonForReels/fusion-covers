@@ -29,10 +29,24 @@ export default function LogoPicker({ logo, setLogo, setColors, newLogo, onPreset
 
   function upload(file) {
     if (!file) return
-    if (file.size > 2 * 1024 * 1024) return toast('Logo files must be under 2 MB.', true)
+    if (file.size > 8 * 1024 * 1024) return toast('Logo files must be under 8 MB.', true)
     const reader = new FileReader()
-    // SVG/PNG kept as-is (transparency matters for logos).
-    reader.onload = () => update({ preset: '', src: reader.result })
+    reader.onload = () => {
+      // Rasterize (SVG too) to ≤700px WebP with alpha, so uploads stay tiny in storage and sync.
+      const img = new Image()
+      img.onload = () => {
+        const w = img.naturalWidth || 700
+        const h = img.naturalHeight || 700
+        const scale = Math.min(1, 700 / Math.max(w, h)) || 1
+        const c = document.createElement('canvas')
+        c.width = Math.max(1, Math.round(w * scale))
+        c.height = Math.max(1, Math.round(h * scale))
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
+        update({ preset: '', src: c.toDataURL('image/webp', 0.85) })
+      }
+      img.onerror = () => toast('Could not read that image.', true)
+      img.src = reader.result
+    }
     reader.readAsDataURL(file)
   }
 
