@@ -54,14 +54,21 @@ export default function LogoPicker({ logo, setLogo, setColors, newLogo, onPreset
                 type="button"
                 title={l.title}
                 className={`logo-btn ${logo?.preset === l.id ? 'on' : ''}`}
-                onClick={() => { update({ preset: l.id, src: '' }); if (logo?.preset !== l.id) onPreset?.(l) }}
+                onClick={() => {
+                  update({ preset: l.id, src: '', ...(logo?.preset !== l.id && l.defaultTint ? { tint: l.defaultTint } : {}) })
+                  if (logo?.preset !== l.id) onPreset?.(l)
+                }}
               >
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d={l.path} fill={l.hex === '#000000' ? '#e8ebf3' : l.hex} /></svg>
+                {l.src ? (
+                  <img src={l.src} alt="" className="logo-img" />
+                ) : (
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d={l.path} fill={l.hex === '#000000' ? '#e8ebf3' : l.hex} /></svg>
+                )}
               </button>
             ))}
           </div>
           <p className="hint">
-            Not listed (Prime Video, Disney+, Hulu, Peacock, studios…)? Pick it under Background › Posters, then “Use as logo” — or upload a PNG/SVG.
+            Not listed (Prime Video, Hulu, Peacock, studios…)? Pick it under Background › Posters, then “Use as logo” — or upload a PNG/SVG.
           </p>
           <label>Logo URL
             <input
@@ -78,6 +85,12 @@ export default function LogoPicker({ logo, setLogo, setColors, newLogo, onPreset
               <label>Color
                 <Seg value={logo.tint} options={[['original', 'Original'], ['white', 'White'], ['custom', 'Custom']]} onChange={(tint) => update({ tint })} />
               </label>
+              <div className="swatches">
+                {['#ffffff', '#000000', preset?.hex, '#f5c518', '#e50914', '#7c5cff', '#20c997'].filter(Boolean).map((c) => (
+                  <button key={c} type="button" title={c} className={`swatch ${logo.tint === 'custom' && logo.color === c ? 'on' : ''}`}
+                    style={{ background: c }} onClick={() => update({ tint: 'custom', color: c })} />
+                ))}
+              </div>
               {logo.tint === 'custom' && <label>Logo color<input type="color" value={logo.color} onChange={(e) => update({ color: e.target.value })} /></label>}
               <label>Size {Math.round(logo.scale * 100)}%
                 <input type="range" min="0.3" max="2.5" step="0.05" value={logo.scale} onChange={(e) => update({ scale: +e.target.value })} />

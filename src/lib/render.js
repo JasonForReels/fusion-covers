@@ -154,9 +154,10 @@ export async function renderCover(canvas, item, opts = {}) {
   if (d.bg === 'image' && d.image && !bgImage) missing.push('background image')
   if (d.bg === 'collage' && d.posters.length && !posters.length) missing.push('posters')
   let logo = null
-  if (d.logo?.preset) logo = logoById(d.logo.preset) ?? null
-  else if (d.logo?.src) {
-    const img = await loadImage(d.logo.src, opts)
+  const preset = d.logo?.preset ? logoById(d.logo.preset) : null
+  if (preset?.path) logo = preset
+  else if (preset?.src || d.logo?.src) {
+    const img = await loadImage(preset?.src ?? d.logo.src, opts)
     if (img) logo = { img }
     else missing.push('logo')
   }

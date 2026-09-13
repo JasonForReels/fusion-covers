@@ -3,6 +3,8 @@
 // Trademarks belong to their owners.
 import { siNetflix, siAppletv, siMax, siHbomax, siHbo, siParamountplus, siCrunchyroll, siYoutube, siYoutubetv, siPlex, siJellyfin, siStarz, siShowtime, siMubi, siTubi, siFubo, siRoku, siTwitch, siItvx, siChannel4, siSky, siViaplay, siDazn, siApple, siTrakt, siImdb, siThemoviedatabase, siLetterboxd, siAnilist, siMyanimelist, siKodi, siStremio, siTvtime } from 'simple-icons'
 
+import disneyPlusLogo from '../assets/logos/disney-plus.png'
+
 // Which TMDB streaming provider (matched by name for the user's region) and/or TV network each mark
 // represents, so picking a logo can fill the collage with that brand's actual titles.
 const BRAND_HINTS = {
@@ -26,6 +28,7 @@ const BRAND_HINTS = {
   channel4: { provider: 'Channel 4', network: 26 },
   sky: { provider: ['Sky Go', 'Now TV'], network: 1063 },
   viaplay: { provider: 'Viaplay' },
+  disneyplus: { provider: ['Disney Plus', 'Disney+'], network: 2739 },
 }
 
 export const LOGOS = [siNetflix, siAppletv, siMax, siHbomax, siHbo, siParamountplus, siCrunchyroll, siYoutube, siYoutubetv, siPlex, siJellyfin, siStarz, siShowtime, siMubi, siTubi, siFubo, siRoku, siTwitch, siItvx, siChannel4, siSky, siViaplay, siDazn, siApple, siTrakt, siImdb, siThemoviedatabase, siLetterboxd, siAnilist, siMyanimelist, siKodi, siStremio, siTvtime].map((i) => ({
@@ -35,5 +38,14 @@ export const LOGOS = [siNetflix, siAppletv, siMax, siHbomax, siHbo, siParamountp
   path: i.path,
   brand: BRAND_HINTS[i.slug] ? { name: i.title, ...BRAND_HINTS[i.slug] } : null,
 }))
+
+// Wordmarks that aren't in Simple Icons, bundled as white-on-transparent PNGs so they can be
+// recolored. `src` images are drawn with the image renderer instead of an SVG path.
+// Disney+ wordmark extracted from disneyplus.com (lumiere-a.akamaihd.net), cropped and whitened.
+const IMAGE_LOGOS = [
+  { id: 'disneyplus', title: 'Disney+', hex: '#113CCF', src: disneyPlusLogo, defaultTint: 'white' },
+]
+
+LOGOS.unshift(...IMAGE_LOGOS.map((l) => ({ ...l, brand: { name: l.title, ...BRAND_HINTS[l.id] } })))
 
 export const logoById = (id) => LOGOS.find((l) => l.id === id)
