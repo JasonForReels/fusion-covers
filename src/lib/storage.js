@@ -28,6 +28,8 @@ export const defaultProject = () => ({ rows: [{ id: uid(), title: 'My Collection
 export const defaultSettings = () => ({
   traktClientId: '',
   tmdbKey: '',
+  mdblistKey: '',
+  aiometadataUrl: '',
   region: 'US',
   manifests: [],
   useImageProxy: false,

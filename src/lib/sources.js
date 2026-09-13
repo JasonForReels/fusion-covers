@@ -32,7 +32,8 @@ export async function loadManifest(input) {
     requiresExtra: (c.extra ?? []).some((e) => e.isRequired) || (c.extraRequired ?? []).length > 0,
     dataSource: {
       kind: 'addonCatalog',
-      payload: { addonId: manifestUrl, catalogId: `${c.type}::${c.id}`, type: c.type },
+      // Fusion exports in the wild use both `type` (betterer.cc) and `catalogType` (widget manager); send both.
+      payload: { addonId: manifestUrl, catalogId: `${c.type}::${c.id}`, type: c.type, catalogType: c.type },
     },
   }))
   return { manifestUrl, name: manifest.name ?? manifest.id ?? 'Addon', catalogs }

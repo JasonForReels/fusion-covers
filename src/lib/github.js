@@ -48,6 +48,35 @@ const enc = (path) => path.split('/').map(encodeURIComponent).join('/')
 export const rawUrl = (owner, repo, ref, path) =>
   `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${enc(path)}`
 
+export async function currentUser(token) {
+  const u = await new GitHub(token).req('GET', '/user')
+  return { login: u.login, avatar: u.avatar_url }
+}
+
+/** Make sure a public repo exists (creating it if needed). Returns { created, defaultBranch }. */
+export async function ensureRepo({ owner, repo }, token, log = () => {}) {
+  const gh = new GitHub(token)
+  try {
+    const info = await gh.req('GET', `/repos/${owner}/${repo}`)
+    return { created: false, defaultBranch: info.default_branch, private: info.private }
+  } catch (e) {
+    if (e.status !== 404) throw e
+  }
+  const me = await currentUser(token)
+  if (me.login.toLowerCase() !== owner.toLowerCase()) throw new Error(`Repository ${owner}/${repo} not found.`)
+  log(`Creating public repo ${owner}/${repo}…`)
+  const info = await gh.req('POST', '/user/repos', {
+    name: repo,
+    description: 'Fusion collection covers (made with Covers)',
+    private: false,
+    auto_init: true,
+    has_issues: false,
+    has_wiki: false,
+    has_projects: false,
+  })
+  return { created: true, defaultBranch: info.default_branch, private: false }
+}
+
 export async function checkRepo({ owner, repo }, token) {
   const gh = new GitHub(token)
   const info = await gh.req('GET', `/repos/${owner}/${repo}`)

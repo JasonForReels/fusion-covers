@@ -6,6 +6,8 @@
   "observability": { "enabled": false },
   "vars": {
     "SHARD_MAP": "0000000000000000",
+    // Public OAuth App client ID (secret + STATE_SECRET are set with `wrangler secret put`).
+    "GITHUB_CLIENT_ID": "",
     "ALLOWED_ORIGINS": "https://jasonforreels.github.io,http://localhost:4173,http://localhost:5173"
   },
   "d1_databases": [

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { loadManifest, loadTraktLists, loadTraktPopular } from '../lib/sources.js'
+import { myLists, topLists, loadMdblistQuery, sourcesForList, mdblistPosters, aiometadataImportFile } from '../lib/mdblist.js'
 import { useToast } from './Toast.jsx'
 
 export default function SourcesPanel({ settings, setSettings, onAddCover, onAttach, openSettings }) {
@@ -7,7 +8,7 @@ export default function SourcesPanel({ settings, setSettings, onAddCover, onAtta
   return (
     <aside className="sources">
       <div className="tabs" role="tablist">
-        {[['addon', 'Stremio addon'], ['trakt', 'Trakt'], ['custom', 'Custom']].map(([id, label]) => (
+        {[['addon', 'Addon'], ['trakt', 'Trakt'], ['mdblist', 'MDBList'], ['custom', 'Custom']].map(([id, label]) => (
           <button key={id} role="tab" aria-selected={tab === id} className={`tab ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>
             {label}
           </button>
@@ -15,6 +16,7 @@ export default function SourcesPanel({ settings, setSettings, onAddCover, onAtta
       </div>
       {tab === 'addon' && <AddonTab settings={settings} setSettings={setSettings} onAddCover={onAddCover} onAttach={onAttach} />}
       {tab === 'trakt' && <TraktTab settings={settings} onAddCover={onAddCover} onAttach={onAttach} openSettings={openSettings} />}
+      {tab === 'mdblist' && <MdblistTab settings={settings} onAddCover={onAddCover} onAttach={onAttach} openSettings={openSettings} />}
       {tab === 'custom' && <CustomTab onAddCover={onAddCover} onAttach={onAttach} />}
     </aside>
   )
@@ -157,6 +159,167 @@ function TraktTab({ settings, onAddCover, onAttach, openSettings }) {
               onAddCover={onAddCover}
               onAttach={onAttach}
             />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function saveJson(name, value) {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }))
+  a.download = name
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000)
+}
+
+function MdblistTab({ settings, onAddCover, onAttach, openSettings }) {
+  const toast = useToast()
+  const [query, setQuery] = useState('')
+  const [lists, setLists] = useState(null)
+  const [picked, setPicked] = useState(new Map()) // id -> list
+  const [title, setTitle] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [pendingImport, setPendingImport] = useState(null)
+  const key = settings.mdblistKey
+
+  async function run(fn) {
+    setBusy(true)
+    try {
+      setLists(await fn())
+    } catch (e) {
+      toast(e.message, true)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function toggle(list) {
+    setPicked((m) => {
+      const next = new Map(m)
+      next.has(list.id) ? next.delete(list.id) : next.set(list.id, list)
+      if (!title && next.size === 1) setTitle(list.name)
+      return next
+    })
+  }
+
+  // Resolve every picked list to Fusion sources (Trakt mirror first, then AIOMetadata).
+  async function resolvePicked() {
+    let aiometadata = null
+    if (settings.aiometadataUrl) {
+      try {
+        const m = await loadManifest(settings.aiometadataUrl)
+        aiometadata = { url: m.manifestUrl, catalogIds: new Set(m.catalogs.map((c) => c.key)) }
+      } catch (e) {
+        aiometadata = { url: settings.aiometadataUrl, catalogIds: new Set() }
+        toast(`Couldn't read your AIOMetadata manifest (${e.message}) — using it anyway.`, true)
+      }
+    }
+    const all = []
+    const missing = []
+    let viaTrakt = 0
+    for (const list of picked.values()) {
+      const r = await sourcesForList(list, { traktClientId: settings.traktClientId, aiometadata })
+      all.push(...r.sources)
+      if (r.via === 'trakt') viaTrakt++
+      if (r.missingInAddon) r.sources.forEach((s) => missing.push({ list, type: s.payload.type }))
+    }
+    setPendingImport(missing.length ? missing : null)
+    return { all, viaTrakt, missing }
+  }
+
+  async function act(mode) {
+    if (!picked.size) return
+    setBusy(true)
+    try {
+      const { all, viaTrakt, missing } = await resolvePicked()
+      const ids = [...picked.keys()]
+      if (mode === 'cover') {
+        await onAddCover({
+          title: title.trim() || [...picked.values()][0].name,
+          dataSources: all,
+          loadPosters: async () => {
+            const sets = await Promise.all(ids.map((id) => mdblistPosters(id, settings, 16).catch(() => [])))
+            const mixed = []
+            for (let i = 0; i < 16; i++) for (const s of sets) if (s[i] && mixed.length < 16) mixed.push(s[i])
+            return mixed
+          },
+        })
+      } else onAttach(all)
+      const parts = [`${viaTrakt} via Trakt`, `${picked.size - viaTrakt} via AIOMetadata`].filter((p) => !p.startsWith('0 '))
+      toast(`${all.length} source${all.length > 1 ? 's' : ''} (${parts.join(', ')})${missing.length ? ' — some need adding to AIOMetadata' : ''}`, missing.length > 0)
+      setPicked(new Map())
+      setTitle('')
+    } catch (e) {
+      toast(e.message, true)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!key) {
+    return (
+      <section>
+        <p className="hint">
+          Browse MDBList lists with your own free API key from{' '}
+          <a href="https://mdblist.com/preferences/" target="_blank" rel="noreferrer noopener">mdblist.com/preferences</a>.
+          Lists become Fusion sources through Trakt (when the list is mirrored there) or your AIOMetadata addon.
+        </p>
+        <button className="primary block" onClick={openSettings}>Add MDBList key</button>
+      </section>
+    )
+  }
+
+  return (
+    <section>
+      <form onSubmit={(e) => { e.preventDefault(); if (query.trim()) run(() => loadMdblistQuery(query, key)) }}>
+        <label>Username, list URL, or search
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="disney plus  ·  mdblist.com/lists/…" autoComplete="off" spellCheck={false} />
+        </label>
+        <div className="row3">
+          <button className="primary" disabled={busy}>Find</button>
+          <button type="button" className="ghost" disabled={busy} onClick={() => run(() => myLists(key))}>My lists</button>
+          <button type="button" className="ghost" disabled={busy} onClick={() => run(() => topLists(key))}>Top</button>
+        </div>
+      </form>
+      {!settings.aiometadataUrl && (
+        <p className="hint">Tip: add your AIOMetadata manifest in Settings so lists that aren't on Trakt work too.</p>
+      )}
+
+      {picked.size > 0 && (
+        <div className="pickbar">
+          <b>{picked.size} list{picked.size > 1 ? 's' : ''} selected</b>
+          <input value={title} placeholder="Cover title" onChange={(e) => setTitle(e.target.value)} />
+          <div className="row2">
+            <button className="primary" disabled={busy} onClick={() => act('cover')}>+ Cover</button>
+            <button className="ghost" disabled={busy || !onAttach} onClick={() => act('attach')}>Attach</button>
+          </div>
+        </div>
+      )}
+
+      {pendingImport && (
+        <div className="pickbar warnbox">
+          <span className="hint">These lists aren't in your AIOMetadata addon yet, so Fusion will show them empty until you add them.</span>
+          <button className="block" onClick={() => saveJson('aiometadata-mdblist-catalogs.json', aiometadataImportFile(pendingImport))}>
+            Download AIOMetadata import file
+          </button>
+        </div>
+      )}
+
+      {lists && (
+        <div className="results">
+          {!lists.length && <p className="hint">No lists found.</p>}
+          {lists.map((l) => (
+            <label key={l.key} className={`result pick ${picked.has(l.id) ? 'on' : ''}`}>
+              <input type="checkbox" checked={picked.has(l.id)} onChange={() => toggle(l)} />
+              <span>
+                <span className="t">{l.name}</span>
+                <span className="m">
+                  {l.owner ? `@${l.owner} · ` : ''}{l.mediatype || 'mixed'} · {l.count ?? '?'} items{l.likes ? ` · ♥ ${l.likes}` : ''}
+                </span>
+              </span>
+            </label>
           ))}
         </div>
       )}

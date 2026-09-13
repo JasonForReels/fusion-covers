@@ -64,7 +64,7 @@ export default function Editor({ item, patch, onRemove, onDuplicate, onClose, se
     try {
       const posters =
         ds.kind === 'addonCatalog'
-          ? await addonPosters(ds.payload.addonId, ds.payload.type, ds.payload.catalogId)
+          ? await addonPosters(ds.payload.addonId, ds.payload.type ?? ds.payload.catalogType, ds.payload.catalogId)
           : await traktPosters(ds.payload, settings.traktClientId)
       if (!posters.length) throw new Error('That catalog returned no posters.')
       setD({ bg: 'collage', posters, brand: null })

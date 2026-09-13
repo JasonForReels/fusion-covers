@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { stampProject, stampSettings } from './lib/merge.js'
 import { useSync } from './lib/useSync.js'
+import { consumeGithubRedirect } from './lib/githubAuth.js'
 import SyncDialog, { SyncBadge } from './components/SyncDialog.jsx'
 import { loadProject, saveProject, loadSettings, saveSettings, uid } from './lib/storage.js'
 import { newItem } from './lib/fusion.js'
@@ -30,6 +31,15 @@ function Shell() {
   const [selected, setSelected] = useState(null) // { rowId, itemId }
   const [dialog, setDialog] = useState(null)
 
+  // Returning from "Sign in with GitHub": grab the token and reopen Publish.
+  useEffect(() => {
+    const r = consumeGithubRedirect()
+    if (r?.token) {
+      toast('Signed in with GitHub')
+      setDialog('publish')
+    } else if (r?.error) toast(r.error, true)
+  }, [toast])
+
   useEffect(() => saveProject(project), [project])
   useEffect(() => saveSettings(settings), [settings])
 
@@ -50,9 +60,9 @@ function Shell() {
   }, [project, selected])
 
   const addCover = useCallback(
-    async ({ title, dataSource }) => {
+    async ({ title, dataSource, dataSources = dataSource ? [dataSource] : [], loadPosters }) => {
       const rowId = selected?.rowId ?? project.rows.at(-1)?.id
-      const item = newItem({ title, dataSources: [dataSource] })
+      const item = newItem({ title, dataSources })
       if (!rowId) {
         const row = { id: uid(), title: 'My Collections', items: [item] }
         setProject((p) => ({ ...p, rows: [...p.rows, row] }))
@@ -61,15 +71,17 @@ function Shell() {
         patchRow(rowId, (r) => ({ ...r, items: [...r.items, item] }))
         setSelected({ rowId, itemId: item.id })
       }
-      toast(`Added “${title}”`)
+      toast(`Added “${title}”${dataSources.length > 1 ? ` with ${dataSources.length} sources` : ''}`)
 
       // Fetch a few posters for a collage background (best effort, straight from the source).
       try {
-        const p = dataSource.payload
-        const posters =
-          dataSource.kind === 'addonCatalog'
-            ? await addonPosters(p.addonId, p.type, p.catalogId)
-            : dataSource.kind === 'traktList'
+        const first = dataSources[0]
+        const p = first?.payload
+        const posters = loadPosters
+          ? await loadPosters()
+          : first?.kind === 'addonCatalog'
+            ? await addonPosters(p.addonId, p.type ?? p.catalogType, p.catalogId)
+            : first?.kind === 'traktList'
               ? await traktPosters(p, settings.traktClientId)
               : []
         if (posters.length) {
@@ -81,16 +93,18 @@ function Shell() {
         // No posters is fine — the gradient cover stays.
       }
     },
-    [selected, project.rows, patchRow, patchItem, settings.traktClientId, toast],
+    [selected, project.rows, patchRow, patchItem, setProject, settings.traktClientId, toast],
   )
 
   const attachSource = useCallback(
-    (dataSource) => {
+    (dataSourceOrList) => {
       if (!selectedItem) return
-      const key = JSON.stringify(dataSource)
-      if (selectedItem.dataSources.some((d) => JSON.stringify(d) === key)) return toast('Already attached')
-      patchItem(selectedItem.id, (it) => ({ ...it, dataSources: [...it.dataSources, dataSource] }))
-      toast(`Attached to “${selectedItem.title}”`)
+      const incoming = [dataSourceOrList].flat()
+      const have = new Set(selectedItem.dataSources.map((d) => JSON.stringify(d)))
+      const fresh = incoming.filter((d) => !have.has(JSON.stringify(d)))
+      if (!fresh.length) return toast('Already attached')
+      patchItem(selectedItem.id, (it) => ({ ...it, dataSources: [...it.dataSources, ...fresh] }))
+      toast(`Attached ${fresh.length} source${fresh.length > 1 ? 's' : ''} to “${selectedItem.title}”`)
     },
     [selectedItem, patchItem, toast],
   )

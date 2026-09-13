@@ -33,6 +33,13 @@ export function newItem({ title = 'New collection', dataSources = [], aspect = '
   return { id: uid(), title, aspect, hideTitle: true, dataSources, design, imageURL: '' }
 }
 
+// Addon catalog payloads carry both spellings of the catalog type (see sources.js).
+export function normalizeSource(ds) {
+  if (ds?.kind !== 'addonCatalog') return ds
+  const t = ds.payload.type ?? ds.payload.catalogType
+  return t ? { ...ds, payload: { ...ds.payload, type: t, catalogType: t } } : ds
+}
+
 export function buildExport(project, imageUrls = {}) {
   return {
     exportType: 'fusionWidgets',
@@ -44,7 +51,7 @@ export function buildExport(project, imageUrls = {}) {
           kind: 'collection',
           payload: {
             items: row.items.map((item) => ({
-              dataSources: item.dataSources,
+              dataSources: item.dataSources.map(normalizeSource),
               hideTitle: item.hideTitle,
               id: item.id,
               imageAspect: item.aspect,

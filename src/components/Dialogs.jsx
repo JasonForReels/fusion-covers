@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { buildExport, parseExport, validate } from '../lib/fusion.js'
 import { renderToBlob } from '../lib/render.js'
-import { publish, checkRepo } from '../lib/github.js'
+import { publish, ensureRepo, currentUser } from '../lib/github.js'
+import { startGithubLogin, githubLoginAvailable } from '../lib/githubAuth.js'
 import { loadToken, saveToken, wipeEverything } from '../lib/storage.js'
 import { useToast } from './Toast.jsx'
 import { cleanKey, testKey } from '../lib/tmdb.js'
@@ -63,37 +64,73 @@ export function PublishDialog({ project, settings, setSettings, onPublished, onC
   const toast = useToast()
   const [gh, setGh] = useState(settings.github)
   const [token, setToken] = useState(loadToken)
+  const [user, setUser] = useState(null)
+  const [advanced, setAdvanced] = useState(false)
+  const [loginEnabled, setLoginEnabled] = useState(false)
+  useEffect(() => {
+    githubLoginAvailable().then((ok) => {
+      setLoginEnabled(ok)
+      if (!ok) setAdvanced(true) // no sign-in on this server: show the token option directly
+    })
+  }, [])
   const [remember, setRemember] = useState(settings.rememberToken)
   const [log, setLog] = useState([])
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(settings.lastUrl || '')
   const problems = validate(project)
-
   const append = (line) => setLog((l) => [...l, line])
-  const ready = gh.owner && gh.repo && gh.branch && token && !problems.length
+
+  // Who is signed in? Fills the owner automatically.
+  useEffect(() => {
+    if (!token) return setUser(null)
+    let live = true
+    currentUser(token)
+      .then((u) => {
+        if (!live) return
+        setUser(u)
+        setGh((g) => ({ ...g, owner: g.owner || u.login, repo: g.repo || 'my-fusion-covers', branch: g.branch || 'main', dir: g.dir ?? 'fusion' }))
+      })
+      .catch(() => live && setUser(null))
+    return () => {
+      live = false
+    }
+  }, [token])
+
+  const ready = gh.owner && gh.repo && token && !problems.length
+
+  function signOut() {
+    saveToken('', false)
+    setToken('')
+    setUser(null)
+    toast('Signed out on this device')
+  }
 
   async function go() {
     setBusy(true)
     setLog([])
     setResult('')
-    saveToken(token, remember)
+    if (advanced) saveToken(token, remember)
     setSettings((s) => ({ ...s, github: gh, rememberToken: remember }))
     try {
-      const repo = await checkRepo(gh, token)
-      if (!repo.canPush) throw new Error('This token cannot write to that repo. It needs Contents: Read and write.')
+      const repo = await ensureRepo(gh, token, append)
+      const target = { ...gh, branch: repo.created ? repo.defaultBranch : gh.branch || repo.defaultBranch }
+      if (repo.created) setGh(target)
       const items = project.rows.flatMap((r) => r.items)
       const images = []
       for (const [i, item] of items.entries()) {
         append(`Rendering cover ${i + 1}/${items.length}…`)
         images.push({ id: item.id, name: `${item.id.toLowerCase()}.png`, blob: await renderToBlob(item, settings) })
       }
-      const { url, urlFor } = await publish(gh, token, images, (urlFor) => buildExport(project, urlFor), append)
+      const { url, urlFor } = await publish(target, token, images, (urlFor) => buildExport(project, urlFor), append)
       onPublished?.(urlFor)
       setResult(url)
-      setSettings((s) => ({ ...s, lastUrl: url }))
+      setSettings((s) => ({ ...s, github: target, lastUrl: url }))
     } catch (e) {
-      append(`✕ ${e.message}`)
-      toast(e.message, true)
+      const msg = e.status === 403 || e.status === 404
+        ? `${e.message} — make sure you can write to ${gh.owner}/${gh.repo}.`
+        : e.message
+      append(`✕ ${msg}`)
+      toast(msg, true)
     } finally {
       setBusy(false)
     }
@@ -101,44 +138,68 @@ export function PublishDialog({ project, settings, setSettings, onPublished, onC
 
   return (
     <Modal
-      title="Publish to your GitHub"
+      title="Publish"
       onClose={onClose}
       actions={
         <>
           <button className="ghost" onClick={() => saveFile('config.json', JSON.stringify(buildExport(project), null, 2))}>Download JSON</button>
-          <button className="primary" disabled={!ready || busy} onClick={go}>{busy ? 'Publishing…' : 'Publish'}</button>
+          {token && <button className="primary" disabled={!ready || busy} onClick={go}>{busy ? 'Publishing…' : 'Publish'}</button>}
         </>
       }
     >
       <p className="hint">
-        Covers and <code>config.json</code> are committed straight from your browser to <b>your</b> repo, in one commit.
-        No third-party server ever sees your token, sources or images. The repo must be <b>public</b> so Fusion can read it.
+        Covers and <code>config.json</code> go into a public repo on <b>your</b> GitHub account, so hosting is free and
+        you own everything. Fusion reads it from there.
       </p>
 
-      {problems.length > 0 && (
-        <ul className="problems">{problems.map((p) => <li key={p}>{p}</li>)}</ul>
+      {problems.length > 0 && <ul className="problems">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
+
+      {!token ? (
+        <div className="signin">
+          {loginEnabled && (
+            <button className="primary block big" onClick={startGithubLogin}>Sign in with GitHub</button>
+          )}
+          <p className="hint">
+            No GitHub account? <a href="https://github.com/signup" target="_blank" rel="noreferrer noopener">Create one free</a>, then come back.
+            We create a repo for you and publish — nothing else is touched.
+          </p>
+          {loginEnabled && (
+            <button className="ghost small" onClick={() => setAdvanced((v) => !v)}>{advanced ? 'Hide' : 'Use a personal access token instead'}</button>
+          )}
+        </div>
+      ) : (
+        <div className="signedin">
+          {user?.avatar && <img src={user.avatar} alt="" />}
+          <span>Signed in as <b>@{user?.login ?? '…'}</b></span>
+          <button className="ghost small" onClick={signOut}>Sign out</button>
+        </div>
       )}
 
-      <div className="grid2">
-        <label>Owner<input value={gh.owner} placeholder="your-username" onChange={(e) => setGh({ ...gh, owner: e.target.value.trim() })} /></label>
-        <label>Repository<input value={gh.repo} placeholder="fusion-covers" onChange={(e) => setGh({ ...gh, repo: e.target.value.trim() })} /></label>
-        <label>Branch<input value={gh.branch} onChange={(e) => setGh({ ...gh, branch: e.target.value.trim() })} /></label>
-        <label>Folder<input value={gh.dir} placeholder="(repo root)" onChange={(e) => setGh({ ...gh, dir: e.target.value.trim() })} /></label>
-      </div>
+      {(token || advanced) && (
+        <div className="grid2">
+          <label>Repository name<input value={gh.repo} placeholder="my-fusion-covers" onChange={(e) => setGh({ ...gh, repo: e.target.value.trim().replace(/\s+/g, '-') })} /></label>
+          <label>Owner<input value={gh.owner} placeholder="your-username" onChange={(e) => setGh({ ...gh, owner: e.target.value.trim() })} /></label>
+          <label>Branch<input value={gh.branch} onChange={(e) => setGh({ ...gh, branch: e.target.value.trim() })} /></label>
+          <label>Folder<input value={gh.dir} placeholder="(repo root)" onChange={(e) => setGh({ ...gh, dir: e.target.value.trim() })} /></label>
+        </div>
+      )}
+      {token && <p className="hint">If the repo doesn't exist yet it's created (public) on first publish.</p>}
 
-      <label>Fine-grained access token
-        <input type="password" value={token} autoComplete="off" placeholder="github_pat_…" onChange={(e) => setToken(e.target.value.trim())} />
-      </label>
-      <p className="hint">
-        Create one at{' '}
-        <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer noopener">github.com/settings/personal-access-tokens</a>:{' '}
-        <i>Only select repositories</i> → pick this repo → <i>Repository permissions → Contents: Read and write</i>. Nothing else.
-        Need a repo? <a href="https://github.com/new" target="_blank" rel="noreferrer noopener">Create a public one</a>.
-      </p>
-      <label className="check">
-        <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-        Remember token on this device (otherwise it's forgotten when you close the tab)
-      </label>
+      {advanced && !token && (
+        <>
+          <label>Fine-grained access token
+            <input type="password" autoComplete="off" placeholder="github_pat_…" onChange={(e) => setToken(e.target.value.trim())} />
+          </label>
+          <p className="hint">
+            Most private option: <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer noopener">create a token</a> limited
+            to one existing repo with <i>Contents: Read and write</i>.
+          </p>
+          <label className="check">
+            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+            Remember token on this device
+          </label>
+        </>
+      )}
 
       {log.length > 0 && <div className="log">{log.join('\n')}</div>}
       {result && (
@@ -204,6 +265,21 @@ export function SettingsDialog({ settings, setSettings, onClose }) {
         Paste either the “API Key” or the “API Read Access Token”.
         Used to fill collages with titles from a streaming service, TV network or studio. Free key at{' '}
         <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer noopener">themoviedb.org/settings/api</a>. Requests go straight to TMDB.
+      </p>
+
+      <div className="grid2">
+        <label>MDBList API key
+          <input value={settings.mdblistKey ?? ''} autoComplete="off" spellCheck={false} placeholder="From mdblist.com/preferences"
+            onChange={(e) => save({ mdblistKey: e.target.value.trim() })} />
+        </label>
+        <label>AIOMetadata manifest URL
+          <input value={settings.aiometadataUrl ?? ''} autoComplete="off" spellCheck={false} placeholder="https://…/manifest.json"
+            onChange={(e) => save({ aiometadataUrl: e.target.value.trim() })} />
+        </label>
+      </div>
+      <p className="hint">
+        MDBList lists are added as Trakt sources when mirrored on Trakt, otherwise through your AIOMetadata addon.
+        Note: your AIOMetadata URL will appear in published JSON, like any addon URL.
       </p>
 
       <label className="check">

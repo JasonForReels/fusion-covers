@@ -65,7 +65,82 @@ async function authorize(req, row) {
   return safeEqual(await sha256Hex(secret), row.write_hash)
 }
 
+/* ---------------- GitHub sign-in (OAuth web flow) ----------------
+ * The only thing the Worker adds is the client secret for the code → token exchange, which GitHub
+ * doesn't allow from browsers. Tokens are handed to the app in the URL fragment (never sent to any
+ * server, and removed from the address bar immediately) and are not stored here.
+ */
+
+const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+
+async function hmac(secret, text) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  return b64url(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(text)))
+}
+
+function allowedReturn(env, value) {
+  try {
+    const u = new URL(value)
+    return env.ALLOWED_ORIGINS.split(',').map((s) => s.trim()).includes(u.origin) ? u : null
+  } catch {
+    return null
+  }
+}
+
+async function githubAuth(req, env, url) {
+  if (url.pathname === '/auth/github/status') {
+    const enabled = !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET && env.STATE_SECRET)
+    return json({ enabled }, 200, { ...cors(req, env), 'Cache-Control': 'public, max-age=300' })
+  }
+  if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET || !env.STATE_SECRET) {
+    return new Response('GitHub sign-in is not configured on this server.', { status: 503 })
+  }
+  const callback = `${url.origin}/auth/github/callback`
+
+  if (url.pathname === '/auth/github/start') {
+    const ret = allowedReturn(env, url.searchParams.get('return') ?? '')
+    const nonce = url.searchParams.get('nonce') ?? ''
+    if (!ret || !/^[A-Za-z0-9_-]{16,64}$/.test(nonce)) return new Response('Bad sign-in request.', { status: 400 })
+    const body = b64url(new TextEncoder().encode(JSON.stringify({ r: ret.href, n: nonce, t: Date.now() })))
+    const state = `${body}.${await hmac(env.STATE_SECRET, body)}`
+    const gh = new URL('https://github.com/login/oauth/authorize')
+    gh.searchParams.set('client_id', env.GITHUB_CLIENT_ID)
+    gh.searchParams.set('redirect_uri', callback)
+    gh.searchParams.set('scope', 'public_repo')
+    gh.searchParams.set('state', state)
+    return Response.redirect(gh.href, 302)
+  }
+
+  if (url.pathname === '/auth/github/callback') {
+    const [body, sig] = (url.searchParams.get('state') ?? '').split('.')
+    if (!body || !sig || sig !== (await hmac(env.STATE_SECRET, body))) return new Response('Invalid sign-in state.', { status: 400 })
+    const state = JSON.parse(atob(body.replace(/-/g, '+').replace(/_/g, '/')))
+    const ret = allowedReturn(env, state.r)
+    if (!ret || Date.now() - state.t > 10 * 60 * 1000) return new Response('Sign-in expired, please try again.', { status: 400 })
+
+    const back = (params) => {
+      const target = new URL(ret.href)
+      target.hash = new URLSearchParams({ ...params, gh_nonce: state.n }).toString()
+      return new Response(null, { status: 302, headers: { Location: target.href, 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store' } })
+    }
+
+    const code = url.searchParams.get('code')
+    if (!code) return back({ gh_error: url.searchParams.get('error_description') ?? 'Sign-in was cancelled.' })
+    const res = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'fusion-covers-sync' },
+      body: JSON.stringify({ client_id: env.GITHUB_CLIENT_ID, client_secret: env.GITHUB_CLIENT_SECRET, code, redirect_uri: callback }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!data.access_token) return back({ gh_error: data.error_description ?? 'GitHub did not return a token.' })
+    return back({ gh_token: data.access_token })
+  }
+
+  return new Response('Not found', { status: 404 })
+}
+
 async function handle(req, env) {
+  if (new URL(req.url).pathname.startsWith('/auth/github/')) return githubAuth(req, env, new URL(req.url))
   const h = cors(req, env)
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: h })
 

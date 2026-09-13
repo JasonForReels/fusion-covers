@@ -61,3 +61,23 @@ npx wrangler d1 create fusion-covers-sync   # put the id in wrangler.jsonc
 npm run db:remote && npm run deploy
 ```
 Then set `VITE_SYNC_URL` in `.env.production`, and add your site's origin to `ALLOWED_ORIGINS`.
+
+## MDBList
+Add your free MDBList API key (and optionally your AIOMetadata manifest URL) in **Settings**. In the **MDBList** tab, tick as many lists as you like, then use **+ Cover** to add them all as sources of one cover (e.g. Disney+ movies + Disney+ shows + Disney+ originals). Fusion has no native MDBList source, so each list becomes:
+1. a native **Trakt list**, when the MDBList list is mirrored on Trakt under the same user/slug, otherwise
+2. an **AIOMetadata catalog** (`movie::mdblist.<id>` / `series::mdblist.<id>`). If a list isn't in your AIOMetadata config yet, the tab offers an import file for AIOMetadata.
+
+## Sign in with GitHub (one-time setup for whoever hosts the Worker)
+1. Go to <https://github.com/settings/applications/new> and fill in:
+   - **Homepage URL:** your site
+   - **Authorization callback URL:** `https://<your-worker>.workers.dev/auth/github/callback`
+2. Put the **Client ID** in `sync-worker/wrangler.jsonc` → `GITHUB_CLIENT_ID`.
+3. Set the secret and deploy:
+   ```bash
+   cd sync-worker
+   npx wrangler secret put GITHUB_CLIENT_SECRET
+   npx wrangler deploy
+   ```
+   (`STATE_SECRET` is any long random string, also set via `wrangler secret put`.)
+
+Users then click **Publish › Sign in with GitHub**, and the app creates a public repo on their account and publishes to it. The Worker only exchanges the login code for a token. It never stores the token, which reaches the browser in the URL fragment and is removed immediately. The fine-grained token option remains for people who want access limited to a single repo.
