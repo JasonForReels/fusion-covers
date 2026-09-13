@@ -9,7 +9,7 @@
     "ALLOWED_ORIGINS": "https://jasonforreels.github.io,http://localhost:4173,http://localhost:5173"
   },
   "d1_databases": [
-    { "binding": "DB", "database_name": "fusion-covers-sync", "database_id": "REPLACE_ON_CREATE" }
+    { "binding": "DB", "database_name": "fusion-covers-sync", "database_id": "e4b27508-f9db-4c13-8fea-b2759331520d" }
   ],
   // Purge vaults nobody has touched in a year (keeps the free tier free).
   "triggers": { "crons": ["17 3 * * *"] }

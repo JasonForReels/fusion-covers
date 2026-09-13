@@ -25,3 +25,39 @@ Uses `{"exportType":"fusionWidgets","exportVersion":1,"widgets":[…collection.r
 1. `npm install && npm run dev`, or push to GitHub (the Pages workflow is included).
 2. Create a **public** repo for your covers, plus a fine-grained token scoped to that repo only, with *Contents: Read and write*.
 3. Load an addon or Trakt list, add covers, style them, then **Publish**. Paste the `config.json` URL into Fusion › Settings › Widgets › Add New › Collections Row.
+
+## Sync with one token
+**Sync** (top bar) › **Turn on sync** creates a token like `fc1_…`. To sync another browser or device, paste the token there under **Sync › Already have a token**. Collections, covers and settings then stay in sync automatically, with no account or email.
+
+- **End-to-end encrypted.** The app derives a storage ID, a write secret and an AES-256-GCM key from the token, and compresses and encrypts the data in the browser. The Worker ([`sync-worker/`](sync-worker)) only stores ciphertext and a hash of the write secret. It does no logging and no analytics.
+- **Edits merge.** Every row and cover carries a change timestamp, so edits on several devices at once are merged instead of overwritten. Deletions win over older edits.
+- **Images don't sync.** Published covers already live in your GitHub repo, so other devices use those. Uploaded images stay on the device they were added on.
+- **The token is the account.** Anyone with it can read and edit. If you lose it and clear your browser, the synced data can't be recovered.
+
+### Keeping it free (Cloudflare free plan)
+Free-plan limits cause errors, never charges. Workers get 100k requests/day. D1 gets 5M row reads/day, 100k row writes/day, and 500 MB per database (up to 10 databases).
+
+| Measure | Effect |
+|---|---|
+| Images never synced, gzip before encrypting | A typical vault is **1–10 KB**, so ~500 MB holds tens of thousands of users |
+| 128 KB hard cap per vault | No single user can use up the storage |
+| Vaults unopened for **180 days** are deleted by a daily cron | Abandoned data frees itself up. Any device opening a vault keeps it alive |
+| Edits batched (4 s), unchanged data never re-uploaded, polling only while the tab is visible | Fewer writes and requests |
+| Polls use `?since=<version>` → `304` | No CORS preflight, so no doubled request count |
+| Limit hit → `503`; clients keep local data and retry later | Degrades safely |
+
+**Check usage:** `cd sync-worker && npx wrangler d1 info fusion-covers-sync`
+
+**Scale to 5 GB for free (shards):**
+1. Create another database with `npx wrangler d1 create fusion-covers-sync-1` and apply `schema.sql` to it.
+2. Add it to `wrangler.jsonc` as binding `DB_1`.
+3. Set `SHARD_MAP`: its 16 characters correspond to the vault ID's first hex digit (`0`–`f`), and each character names the database that holds those vaults. For example, `0000000011111111` moves IDs `8…f` to `DB_1`.
+4. Copy those rows across before deploying.
+
+### Deploy the Worker
+```bash
+cd sync-worker && npm install
+npx wrangler d1 create fusion-covers-sync   # put the id in wrangler.jsonc
+npm run db:remote && npm run deploy
+```
+Then set `VITE_SYNC_URL` in `.env.production`, and add your site's origin to `ALLOWED_ORIGINS`.
