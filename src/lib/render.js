@@ -278,18 +278,18 @@ export async function renderCover(canvas, item, opts = {}) {
   return { missing }
 }
 
-export function canvasToBlob(canvas) {
+export function canvasToBlob(canvas, type = 'image/png', quality) {
   return new Promise((resolve, reject) => {
     try {
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Canvas export failed.'))), 'image/png')
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Canvas export failed.'))), type, quality)
     } catch {
       reject(new Error('An image without CORS permission tainted the canvas. Enable the image proxy or upload the image.'))
     }
   })
 }
 
-export async function renderToBlob(item, opts) {
+export async function renderToBlob(item, opts, type, quality) {
   const canvas = document.createElement('canvas')
   await renderCover(canvas, item, opts)
-  return canvasToBlob(canvas)
+  return canvasToBlob(canvas, type, quality)
 }

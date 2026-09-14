@@ -3,7 +3,7 @@ import { loadManifest, loadTraktLists, loadTraktPopular } from '../lib/sources.j
 import { myLists, topLists, userLists, searchMany, CATEGORIES, SORTS, loadMdblistQuery, sourcesForList, mdblistPosters, aiometadataImportFile } from '../lib/mdblist.js'
 import { useToast } from './Toast.jsx'
 
-export default function SourcesPanel({ settings, setSettings, onAddCover, onAttach, openSettings }) {
+export default function SourcesPanel({ settings, setSettings, onAddCover, onAttach, onCreateRow, openSettings }) {
   const [tab, setTab] = useState('addon')
   return (
     <aside className="sources">
@@ -14,7 +14,7 @@ export default function SourcesPanel({ settings, setSettings, onAddCover, onAtta
           </button>
         ))}
       </div>
-      {tab === 'addon' && <AddonTab settings={settings} setSettings={setSettings} onAddCover={onAddCover} onAttach={onAttach} />}
+      {tab === 'addon' && <AddonTab settings={settings} setSettings={setSettings} onAddCover={onAddCover} onAttach={onAttach} onCreateRow={onCreateRow} />}
       {tab === 'trakt' && <TraktTab settings={settings} onAddCover={onAddCover} onAttach={onAttach} openSettings={openSettings} />}
       {tab === 'mdblist' && <MdblistTab settings={settings} onAddCover={onAddCover} onAttach={onAttach} openSettings={openSettings} />}
       {tab === 'custom' && <CustomTab onAddCover={onAddCover} onAttach={onAttach} />}
@@ -35,11 +35,14 @@ function ResultCard({ title, meta, warn, dataSource, onAddCover, onAttach }) {
   )
 }
 
-function AddonTab({ settings, setSettings, onAddCover, onAttach }) {
+function AddonTab({ settings, setSettings, onAddCover, onAttach, onCreateRow }) {
   const toast = useToast()
-  const [url, setUrl] = useState('')
+  const [url, setUrl] = useState(settings.aiometadataUrl || '')
   const [addon, setAddon] = useState(null)
   const [filter, setFilter] = useState('')
+  const [origin, setOrigin] = useState('')
+  const [picked, setPicked] = useState(new Set()) // group keys
+  const [rowTitle, setRowTitle] = useState('')
   const [busy, setBusy] = useState(false)
 
   async function load(input = url) {
@@ -49,8 +52,13 @@ function AddonTab({ settings, setSettings, onAddCover, onAttach }) {
       const a = await loadManifest(input)
       setAddon(a)
       setUrl(a.manifestUrl)
+      setPicked(new Set())
+      setFilter('')
+      setOrigin('')
+      setRowTitle(a.name)
       setSettings((s) => ({
         ...s,
+        ...(a.isAiometadata ? { aiometadataUrl: a.manifestUrl } : {}),
         manifests: [{ url: a.manifestUrl, name: a.name }, ...s.manifests.filter((m) => m.url !== a.manifestUrl)].slice(0, 12),
       }))
       if (!a.catalogs.length) toast('That addon has no catalogs.', true)
@@ -61,17 +69,39 @@ function AddonTab({ settings, setSettings, onAddCover, onAttach }) {
     }
   }
 
-  const catalogs = addon?.catalogs.filter((c) => `${c.name} ${c.type}`.toLowerCase().includes(filter.toLowerCase())) ?? []
+  const origins = addon ? [...new Set(addon.groups.map((g) => g.origin))] : []
+  const shown = addon?.groups
+    .filter((g) => !origin || g.origin === origin)
+    .filter((g) => `${g.name} ${g.types.join(' ')} ${g.origin}`.toLowerCase().includes(filter.trim().toLowerCase())) ?? []
+  const sourcesOf = (g) => g.catalogs.map((c) => c.dataSource)
+  const chosen = addon?.groups.filter((g) => picked.has(g.key)) ?? []
+  const allShownPicked = shown.length > 0 && shown.every((g) => picked.has(g.key))
+
+  const toggle = (key) => setPicked((p) => { const n = new Set(p); n.has(key) ? n.delete(key) : n.add(key); return n })
+  const toggleShown = () => setPicked((p) => { const n = new Set(p); shown.forEach((g) => (allShownPicked ? n.delete(g.key) : n.add(g.key))); return n })
+
+  async function createRow() {
+    setBusy(true)
+    try {
+      await onCreateRow({ title: rowTitle.trim() || addon.name, covers: chosen.map((g) => ({ title: g.name, dataSources: sourcesOf(g) })) })
+      setPicked(new Set())
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <section>
       <form onSubmit={(e) => { e.preventDefault(); load() }}>
-        <label>Manifest URL
-          <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/manifest.json" autoComplete="off" spellCheck={false} />
+        <label>Addon manifest URL
+          <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Your AIOMetadata …/manifest.json" autoComplete="off" spellCheck={false} />
         </label>
-        <button className="primary block" disabled={busy}>{busy ? 'Loading…' : 'Load catalogs'}</button>
+        <button className="primary block" disabled={busy}>{busy ? 'Loading…' : 'Load my lists'}</button>
       </form>
-      <p className="hint">Fetched directly by your browser. Fusion needs this URL, so it <b>will</b> be visible in your published JSON — avoid manifests with secrets in a public repo.</p>
+      <p className="hint">
+        Paste your <b>AIOMetadata</b> (or any Stremio addon) manifest to pull in every list you've added to it, then tick the ones you
+        want and create collections in one go. Fusion needs this URL, so it <b>will</b> be visible in your published JSON.
+      </p>
 
       {settings.manifests.length > 0 && (
         <div className="chips">
@@ -84,20 +114,46 @@ function AddonTab({ settings, setSettings, onAddCover, onAttach }) {
         </div>
       )}
 
+      {chosen.length > 0 && (
+        <div className="pickbar">
+          <b>{chosen.length} list{chosen.length > 1 ? 's' : ''} selected</b>
+          <input value={rowTitle} placeholder="Collection row name" onChange={(e) => setRowTitle(e.target.value)} />
+          <button className="primary" disabled={busy} onClick={createRow}>
+            {busy ? 'Creating…' : `Create ${chosen.length} collection${chosen.length > 1 ? 's' : ''} in a new row`}
+          </button>
+          <div className="row2">
+            <button className="ghost" disabled={busy} onClick={() => onAddCover({ title: chosen[0].name, dataSources: chosen.flatMap(sourcesOf) })}>Combine into 1 cover</button>
+            <button className="ghost" disabled={busy || !onAttach} onClick={() => onAttach(chosen.flatMap(sourcesOf))}>Attach to selected</button>
+          </div>
+        </div>
+      )}
+
       {addon && (
         <div className="results">
-          <div className="group">{addon.name} · {addon.catalogs.length} catalogs</div>
-          {addon.catalogs.length > 8 && <input placeholder="Filter catalogs…" value={filter} onChange={(e) => setFilter(e.target.value)} />}
-          {catalogs.map((c) => (
-            <ResultCard
-              key={c.key}
-              title={c.name}
-              meta={c.type}
-              warn={c.requiresExtra ? 'needs search/extra — may be empty' : null}
-              dataSource={c.dataSource}
-              onAddCover={onAddCover}
-              onAttach={onAttach}
-            />
+          <div className="group">{addon.name} · {addon.groups.length} lists</div>
+          {addon.groups.length > 0 && (
+            <div className="filters">
+              <input placeholder="Filter lists…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+              {origins.length > 1 && (
+                <select value={origin} onChange={(e) => setOrigin(e.target.value)} aria-label="Source">
+                  <option value="">All sources</option>
+                  {origins.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              )}
+              <button type="button" className="ghost small" onClick={toggleShown}>{allShownPicked ? 'Clear' : `Select all${shown.length !== addon.groups.length ? ` ${shown.length}` : ''}`}</button>
+            </div>
+          )}
+          {shown.map((g) => (
+            <label key={g.key} className={`result pick ${picked.has(g.key) ? 'on' : ''}`}>
+              <input type="checkbox" checked={picked.has(g.key)} onChange={() => toggle(g.key)} />
+              <span>
+                <span className="t">{g.name}</span>
+                <span className="m">
+                  {g.origin !== 'Other' ? `${g.origin} · ` : ''}{g.types.join(' + ')}
+                  {g.requiresExtra && <span className="warntext"> · needs search — may be empty</span>}
+                </span>
+              </span>
+            </label>
           ))}
         </div>
       )}

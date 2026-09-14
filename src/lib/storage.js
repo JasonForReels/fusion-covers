@@ -36,6 +36,8 @@ export const defaultSettings = () => ({
   github: { owner: '', repo: '', branch: 'main', dir: 'fusion' },
   rememberToken: false,
   lastUrl: '',
+  host: null, // { id, secret } for "Host with Covers"
+  publishTo: 'covers', // covers | github
 })
 
 export const loadProject = () => read(localStorage, PROJECT_KEY, null) ?? defaultProject()

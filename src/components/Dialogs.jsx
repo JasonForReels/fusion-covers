@@ -5,6 +5,7 @@ import { publish, ensureRepo, currentUser } from '../lib/github.js'
 import { startGithubLogin, githubLoginAvailable } from '../lib/githubAuth.js'
 import { loadToken, saveToken, wipeEverything } from '../lib/storage.js'
 import { useToast } from './Toast.jsx'
+import { hostingAvailable, newHost, publishHosted, hostedUrl } from '../lib/hosting.js'
 import { cleanKey, testKey } from '../lib/tmdb.js'
 
 function Modal({ title, onClose, children, actions }) {
@@ -77,6 +78,9 @@ export function PublishDialog({ project, settings, setSettings, onPublished, onC
   const [log, setLog] = useState([])
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(settings.lastUrl || '')
+  const [needsRepo, setNeedsRepo] = useState(null)
+  const [mode, setMode] = useState(hostingAvailable() ? settings.publishTo ?? 'covers' : 'github')
+  const hosted = mode === 'covers'
   const problems = validate(project)
   const append = (line) => setLog((l) => [...l, line])
 
@@ -105,28 +109,57 @@ export function PublishDialog({ project, settings, setSettings, onPublished, onC
     toast('Signed out on this device')
   }
 
-  async function go() {
+  async function renderAll(type, ext, quality) {
+    const items = project.rows.flatMap((r) => r.items)
+    const images = []
+    for (const [i, item] of items.entries()) {
+      append(`Rendering cover ${i + 1}/${items.length}…`)
+      images.push({ id: item.id, name: `${item.id.toLowerCase()}.${ext}`, blob: await renderToBlob(item, settings, type, quality) })
+    }
+    return images
+  }
+
+  async function goHosted() {
     setBusy(true)
     setLog([])
     setResult('')
+    const host = settings.host ?? newHost()
+    setSettings((s) => ({ ...s, host, publishTo: 'covers' }))
+    try {
+      // JPEG keeps hosted covers small (free-tier storage); covers are opaque so nothing is lost.
+      const images = await renderAll('image/jpeg', 'jpg', 0.9)
+      const { url, urlFor } = await publishHosted(host, images, (urlFor) => buildExport(project, urlFor), append)
+      onPublished?.(urlFor)
+      setResult(url)
+      setSettings((s) => ({ ...s, lastUrl: url }))
+    } catch (e) {
+      append(`✕ ${e.message}`)
+      toast(e.message, true)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function go() {
+    if (hosted) return goHosted()
+    setBusy(true)
+    setLog([])
+    setResult('')
+    setNeedsRepo(null)
     if (advanced) saveToken(token, remember)
-    setSettings((s) => ({ ...s, github: gh, rememberToken: remember }))
+    setSettings((s) => ({ ...s, github: gh, rememberToken: remember, publishTo: 'github' }))
     try {
       const repo = await ensureRepo(gh, token, append)
       const target = { ...gh, branch: repo.created ? repo.defaultBranch : gh.branch || repo.defaultBranch }
       if (repo.created) setGh(target)
-      const items = project.rows.flatMap((r) => r.items)
-      const images = []
-      for (const [i, item] of items.entries()) {
-        append(`Rendering cover ${i + 1}/${items.length}…`)
-        images.push({ id: item.id, name: `${item.id.toLowerCase()}.png`, blob: await renderToBlob(item, settings) })
-      }
+      const images = await renderAll('image/png', 'png')
       const { url, urlFor } = await publish(target, token, images, (urlFor) => buildExport(project, urlFor), append)
       onPublished?.(urlFor)
       setResult(url)
       setSettings((s) => ({ ...s, github: target, lastUrl: url }))
     } catch (e) {
-      const msg = e.status === 403 || e.status === 404
+      if (e.needsRepo) setNeedsRepo(e.needsRepo)
+      const msg = e.needsRepo ? e.message : e.status === 403 || e.status === 404
         ? `${e.message} — make sure you can write to ${gh.owner}/${gh.repo}.`
         : e.message
       append(`✕ ${msg}`)
@@ -143,16 +176,34 @@ export function PublishDialog({ project, settings, setSettings, onPublished, onC
       actions={
         <>
           <button className="ghost" onClick={() => saveFile('config.json', JSON.stringify(buildExport(project), null, 2))}>Download JSON</button>
-          {token && <button className="primary" disabled={!ready || busy} onClick={go}>{busy ? 'Publishing…' : 'Publish'}</button>}
+          {(hosted || token) && <button className="primary" disabled={(hosted ? problems.length > 0 : !ready) || busy} onClick={go}>{busy ? 'Publishing…' : 'Publish'}</button>}
         </>
       }
     >
-      <p className="hint">
-        Covers and <code>config.json</code> go into a public repo on <b>your</b> GitHub account, so hosting is free and
-        you own everything. Fusion reads it from there.
-      </p>
+      {hostingAvailable() && (
+        <div className="seg">
+          <button type="button" className={hosted ? 'on' : ''} onClick={() => { setMode('covers'); setResult('') }}>Host for me (easiest)</button>
+          <button type="button" className={!hosted ? 'on' : ''} onClick={() => { setMode('github'); setResult('') }}>My GitHub repo</button>
+        </div>
+      )}
 
       {problems.length > 0 && <ul className="problems">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
+
+      {hosted ? (
+        <>
+          <p className="hint">
+            No account needed. Covers and <code>config.json</code> are hosted for free and you get one permanent link to paste into
+            Fusion. Re-publishing updates the same link. Anyone with the link can view it; only this browser (and your synced
+            devices) can change it. Links Fusion hasn't opened for 180 days are removed.
+          </p>
+          {settings.host && !result && (
+            <p className="hint">Your link: <code>{hostedUrl(settings.host)}</code></p>
+          )}
+        </>
+      ) : (<>
+      <p className="hint">
+        Covers and <code>config.json</code> go into a public repo on <b>your</b> GitHub account, so you own everything. Fusion reads it from there.
+      </p>
 
       {!token ? (
         <div className="signin">
@@ -192,7 +243,8 @@ export function PublishDialog({ project, settings, setSettings, onPublished, onC
           </label>
           <p className="hint">
             Most private option: <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer noopener">create a token</a> limited
-            to one existing repo with <i>Contents: Read and write</i>.
+            to one existing repo with <i>Contents: Read and write</i>. To let us create the repo for you, give it
+            <i>All repositories</i> with <i>Administration</i> and <i>Contents: Read and write</i>.
           </p>
           <label className="check">
             <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
@@ -201,12 +253,28 @@ export function PublishDialog({ project, settings, setSettings, onPublished, onC
         </>
       )}
 
+      </>)}
+
       {log.length > 0 && <div className="log">{log.join('\n')}</div>}
+      {needsRepo && (
+        <div className="brandbox">
+          <p className="hint">
+            Personal access tokens usually can't create repositories. Create it on GitHub in one click, give your token
+            access to it (<i>Repository access</i> › add <b>{needsRepo.repo}</b>, <i>Contents: Read and write</i>), then publish again.
+            Or sign out and use <b>Sign in with GitHub</b>, which creates the repo automatically.
+          </p>
+          <div className="keyrow">
+            <a className="button primary" href={`https://github.com/new?name=${encodeURIComponent(needsRepo.repo)}&owner=${encodeURIComponent(needsRepo.owner)}&visibility=public&description=${encodeURIComponent('Fusion collection covers')}`} target="_blank" rel="noreferrer noopener">Create {needsRepo.repo} on GitHub</a>
+            <a className="button" href="https://github.com/settings/personal-access-tokens" target="_blank" rel="noreferrer noopener">Edit token access</a>
+            <button type="button" disabled={busy} onClick={go}>I've done it — publish</button>
+          </div>
+        </div>
+      )}
       {result && (
         <>
           <label>Your Fusion JSON URL</label>
           <CopyUrl url={result} />
-          <p className="hint">In Fusion: Settings › Widgets › Add New › Collections Row › Import JSON. Re-publishing updates the same URL (GitHub may cache for ~5 minutes).</p>
+          <p className="hint">In Fusion: Settings › Widgets › Add New › Collections Row › Import JSON. Re-publishing updates the same URL{hosted ? ' (Fusion may take a minute to see changes)' : ' (GitHub may cache for ~5 minutes)'}.</p>
         </>
       )}
     </Modal>

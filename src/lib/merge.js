@@ -96,7 +96,7 @@ export function mergeProjects(local, remote, now = Date.now()) {
 
 /* ---------- settings: only non-device-specific fields sync, last writer wins ---------- */
 
-export const SYNCED_SETTINGS = ['traktClientId', 'tmdbKey', 'mdblistKey', 'aiometadataUrl', 'region', 'manifests', 'useImageProxy', 'github']
+export const SYNCED_SETTINGS = ['traktClientId', 'tmdbKey', 'mdblistKey', 'aiometadataUrl', 'region', 'manifests', 'useImageProxy', 'github', 'host', 'publishTo']
 
 export const pickSynced = (s) => Object.fromEntries(SYNCED_SETTINGS.map((k) => [k, s[k]]))
 

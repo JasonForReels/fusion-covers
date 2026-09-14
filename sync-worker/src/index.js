@@ -1,4 +1,5 @@
 import { mdblistAddon } from './mdblist.js'
+import { hostRequest, purgeHosts } from './hosting.js'
 
 // Zero-knowledge sync store for Covers. The browser encrypts everything with a key derived from
 // the user's sync token; this Worker only ever sees an opaque id, a hash of a write secret, and
@@ -148,6 +149,15 @@ async function handle(req, env, ctx) {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: h })
 
   const url = new URL(req.url)
+  if (url.pathname.startsWith('/h/')) {
+    const hostId = url.pathname.split('/')[2] ?? ''
+    if (!/^[a-f0-9]{32}$/.test(hostId)) return json({ error: 'bad_id' }, 400, h)
+    try {
+      return await hostRequest(req, url, dbFor(env, hostId), h)
+    } catch {
+      return json({ error: 'unavailable' }, 503, { ...h, 'Retry-After': '3600' })
+    }
+  }
   const m = url.pathname.match(/^\/v1\/vaults\/([^/]+)$/)
   if (!m) return json({ error: 'not_found' }, 404, h)
   const id = m[1]
@@ -230,6 +240,9 @@ export default {
 
   async scheduled(_event, env) {
     const cutoff = Date.now() - INACTIVE_DAYS * DAY_MS
-    for (const db of allDbs(env)) await db.prepare('DELETE FROM vaults WHERE accessed_at < ?').bind(cutoff).run()
+    for (const db of allDbs(env)) {
+      await db.prepare('DELETE FROM vaults WHERE accessed_at < ?').bind(cutoff).run()
+      await purgeHosts(db, cutoff)
+    }
   },
 }

@@ -6,10 +6,10 @@
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-size:14px}
 button,input,select,textarea{font:inherit;color:inherit}
-button{cursor:pointer;border:1px solid var(--line);background:var(--panel2);border-radius:9px;padding:8px 12px}
-button:hover{border-color:var(--accent)}
-button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
-button.primary:hover{background:var(--accent2)}
+button,a.button{text-decoration:none;display:inline-block;cursor:pointer;border:1px solid var(--line);background:var(--panel2);border-radius:9px;padding:8px 12px}
+button:hover,a.button:hover{border-color:var(--accent)}
+button.primary,a.button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+button.primary:hover,a.button.primary:hover{background:var(--accent2)}
 button.ghost{background:transparent}
 button.danger{color:var(--danger)}
 button.icon{padding:4px 8px;background:transparent;border:0}

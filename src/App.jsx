@@ -96,6 +96,28 @@ function Shell() {
     [selected, project.rows, patchRow, patchItem, setProject, settings.traktClientId, toast],
   )
 
+  // Bulk: a new row with one cover per list; posters are fetched one cover at a time in the background.
+  const createRow = useCallback(
+    async ({ title, covers }) => {
+      const items = covers.map((c) => newItem({ title: c.title, dataSources: c.dataSources }))
+      const row = { id: uid(), title, items }
+      setProject((p) => ({ ...p, rows: p.rows.length === 1 && !p.rows[0].items.length ? [row] : [...p.rows, row] }))
+      setSelected({ rowId: row.id, itemId: null })
+      toast(`Created “${title}” with ${items.length} collection${items.length > 1 ? 's' : ''}`)
+      for (const item of items) {
+        const p = item.dataSources.find((d) => d.kind === 'addonCatalog')?.payload
+        if (!p) continue
+        try {
+          const posters = await addonPosters(p.addonId, p.type ?? p.catalogType, p.catalogId)
+          if (posters.length) patchItem(item.id, (it) => (it.design.bg === 'gradient' ? { ...it, design: { ...it.design, bg: 'collage', posters } } : it))
+        } catch {
+          // Keep the gradient cover.
+        }
+      }
+    },
+    [setProject, patchItem, toast],
+  )
+
   const attachSource = useCallback(
     (dataSourceOrList) => {
       if (!selectedItem) return
@@ -145,6 +167,7 @@ function Shell() {
           setSettings={setSettings}
           onAddCover={addCover}
           onAttach={selectedItem ? attachSource : null}
+          onCreateRow={createRow}
           openSettings={() => setDialog('settings')}
         />
         <Board

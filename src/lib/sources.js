@@ -36,7 +36,27 @@ export async function loadManifest(input) {
       payload: { addonId: manifestUrl, catalogId: `${c.type}::${c.id}`, type: c.type, catalogType: c.type },
     },
   }))
-  return { manifestUrl, name: manifest.name ?? manifest.id ?? 'Addon', catalogs }
+  const name = manifest.name ?? manifest.id ?? 'Addon'
+  return { manifestUrl, name, catalogs, groups: groupCatalogs(catalogs), isAiometadata: /aio\s*-?metadata/i.test(`${manifest.id} ${name}`) }
+}
+
+// Where a catalog's content comes from, read from AIOMetadata-style ids ("mdblist.123", "trakt.list.x", "tmdb.top").
+const ORIGINS = { mdblist: 'MDBList', trakt: 'Trakt', tmdb: 'TMDB', tvdb: 'TVDB', letterboxd: 'Letterboxd', anilist: 'AniList', mal: 'MyAnimeList', kitsu: 'Kitsu', imdb: 'IMDb', streaming: 'Streaming', simkl: 'Simkl' }
+const originOf = (id) => ORIGINS[String(id).split(/[._:-]/)[0].toLowerCase()] ?? 'Other'
+
+/** One entry per list: an addon's movie + series catalogs with the same id/name become one collection. */
+export function groupCatalogs(catalogs) {
+  const groups = new Map()
+  for (const c of catalogs) {
+    const id = c.key.split('::').slice(1).join('::')
+    const k = `${id}|${c.name.replace(/\s*\((movies?|series|shows?|tv)\)\s*$/i, '').toLowerCase()}`
+    const g = groups.get(k) ?? { key: k, name: c.name.replace(/\s*\((movies?|series|shows?|tv)\)\s*$/i, ''), origin: originOf(id), types: [], catalogs: [], requiresExtra: false }
+    g.types.push(c.type)
+    g.catalogs.push(c)
+    g.requiresExtra ||= c.requiresExtra
+    groups.set(k, g)
+  }
+  return [...groups.values()]
 }
 
 export async function addonPosters(manifestUrl, type, catalogId, limit = 12) {

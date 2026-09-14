@@ -65,7 +65,9 @@ export async function ensureRepo({ owner, repo }, token, log = () => {}) {
   const me = await currentUser(token)
   if (me.login.toLowerCase() !== owner.toLowerCase()) throw new Error(`Repository ${owner}/${repo} not found.`)
   log(`Creating public repo ${owner}/${repo}…`)
-  const info = await gh.req('POST', '/user/repos', {
+  let info
+  try {
+    info = await gh.req('POST', '/user/repos', {
     name: repo,
     description: 'Fusion collection covers (made with Covers)',
     private: false,
@@ -73,7 +75,14 @@ export async function ensureRepo({ owner, repo }, token, log = () => {}) {
     has_issues: false,
     has_wiki: false,
     has_projects: false,
-  })
+    })
+  } catch (e) {
+    // Fine-grained tokens limited to selected repos can't create repos (or even see new ones).
+    if (e.status !== 403 && e.status !== 422) throw e
+    const err = new Error(`Your token can't create or access ${owner}/${repo}.`)
+    err.needsRepo = { owner, repo }
+    throw err
+  }
   return { created: true, defaultBranch: info.default_branch, private: false }
 }
 
