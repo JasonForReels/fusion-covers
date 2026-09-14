@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { imageLogoForBrand } from '../lib/logos.js'
 import { listProviders, searchCompanies, NETWORKS, STUDIOS, IMG } from '../lib/tmdb.js'
 
 const KINDS = [
@@ -55,6 +56,8 @@ export default function BrandPicker({ brand, busy, settings, onPick, onUseLogo, 
         ? NETWORKS.filter((n) => n.name.toLowerCase().includes(q))
         : (companies ?? STUDIOS.filter((s) => s.name.toLowerCase().includes(q)))
 
+  // Bundled wordmarks (e.g. Netflix) replace TMDB's provider/network icons.
+  const logoSrc = (o) => imageLogoForBrand(o)?.src ?? (o.logo ? IMG(o.logo, 'w92') : null)
   const isCurrent = (o) => brand && brand.kind === o.kind && brand.id === o.id
 
   return (
@@ -62,9 +65,9 @@ export default function BrandPicker({ brand, busy, settings, onPick, onUseLogo, 
       <label>Posters from</label>
       {brand && (
         <div className="brandnow">
-          {brand.logo ? <img src={IMG(brand.logo, 'w92')} alt="" /> : null}
+          {logoSrc(brand) ? <img src={logoSrc(brand)} alt="" /> : null}
           <span><b>{brand.name}</b> <span className="muted">· {KINDS.find((k) => k[0] === brand.kind)?.[1]}</span></span>
-          {brand.logo && <button type="button" className="small" onClick={onUseLogo}>Use as logo</button>}
+          {logoSrc(brand) && <button type="button" className="small" onClick={onUseLogo}>Use as logo</button>}
           <button type="button" className="small" disabled={busy} onClick={() => onPick(brand)}>↻</button>
         </div>
       )}
@@ -89,7 +92,7 @@ export default function BrandPicker({ brand, busy, settings, onPick, onUseLogo, 
       <div className="brandlist">
         {options.map((o) => (
           <button key={`${o.kind}${o.id}`} type="button" disabled={busy} className={`brandopt ${isCurrent(o) ? 'on' : ''}`} onClick={() => onPick(o)}>
-            {o.logo ? <img src={IMG(o.logo, 'w92')} alt="" loading="lazy" /> : <span className="nologo" />}
+            {logoSrc(o) ? <img src={logoSrc(o)} alt="" loading="lazy" /> : <span className="nologo" />}
             <span>{o.name}{o.country ? <span className="muted"> · {o.country}</span> : null}</span>
           </button>
         ))}

@@ -106,6 +106,9 @@ export default function LogoPicker({ logo, setLogo, setColors, newLogo, onPreset
                 ))}
               </div>
               {logo.tint === 'custom' && <label>Logo color<input type="color" value={logo.color} onChange={(e) => update({ color: e.target.value })} /></label>}
+              <label>Backdrop shadow {logo.shadow ? `${Math.round(logo.shadow * 100)}%` : 'off'}
+                <input type="range" min="0" max="1" step="0.05" value={logo.shadow ?? 0} onChange={(e) => update({ shadow: +e.target.value })} />
+              </label>
               <label>Size {Math.round(logo.scale * 100)}%
                 <input type="range" min="0.3" max="2.5" step="0.05" value={logo.scale} onChange={(e) => update({ scale: +e.target.value })} />
               </label>

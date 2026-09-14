@@ -25,7 +25,7 @@ export function defaultDesign(seed = Math.floor(Math.random() * PALETTE.length))
   }
 }
 
-export const newLogo = (fields) => ({ preset: '', src: '', tint: 'original', color: '#ffffff', scale: 1, pos: 'center', ...fields })
+export const newLogo = (fields) => ({ preset: '', src: '', tint: 'original', color: '#ffffff', scale: 1, shadow: 0, pos: 'center', ...fields })
 
 export function newItem({ title = 'New collection', dataSources = [], aspect = 'wide', posters = [] } = {}) {
   const design = defaultDesign()

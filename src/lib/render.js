@@ -188,13 +188,21 @@ export async function renderCover(canvas, item, opts = {}) {
   if (logo) {
     const l = d.logo
     const fill = l.tint === 'custom' ? l.color : l.tint === 'white' ? '#ffffff' : null
+    // Per-logo backdrop shadow (0–1) to lift the logo off busy backgrounds; falls back to the cover shadow.
+    const logoShadow = (size) => {
+      const k = l.shadow ?? 0
+      if (!k) return shadow(size * 0.12)
+      ctx.shadowColor = `rgba(0,0,0,${0.45 + 0.5 * k})`
+      ctx.shadowBlur = size * (0.1 + 0.5 * k)
+      ctx.shadowOffsetY = size * 0.03 * k
+    }
     if (logo.path) {
       const side = Math.min(W, H) * 0.3 * l.scale
       blocks[l.pos].push({
         h: side,
         draw: (y) => {
           ctx.save()
-          shadow(side * 0.12)
+          logoShadow(side)
           ctx.translate((W - side) / 2, y)
           ctx.scale(side / 24, side / 24)
           ctx.fillStyle = fill ?? logo.hex
@@ -210,7 +218,7 @@ export async function renderCover(canvas, item, opts = {}) {
         h,
         draw: (y) => {
           ctx.save()
-          shadow(Math.min(w, h) * 0.12)
+          logoShadow(Math.min(w, h))
           if (isOpaque(logo.img)) {
             ctx.beginPath()
             ctx.roundRect((W - w) / 2, y, w, h, Math.min(w, h) * 0.18)
