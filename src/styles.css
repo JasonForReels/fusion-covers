@@ -143,3 +143,7 @@ button.big{padding:12px;font-size:15px}
 .signedin img{width:28px;height:28px;border-radius:50%}
 .signedin span{flex:1}
 .signedin button.small{margin:0}
+
+.tabs.sub{margin:0 0 10px}
+.filters{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+.filters input{grid-column:1/-1}

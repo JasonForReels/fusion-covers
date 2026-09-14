@@ -1,9 +1,12 @@
 // MDBList (user's own free API key, straight from the browser — api.mdblist.com sends CORS headers).
 // Fusion has no native MDBList source, so each list is turned into one Fusion reads:
 //   1. a native `traktList` when the MDBList list is mirrored on Trakt (same user + slug), else
-//   2. an `addonCatalog` through the user's AIOMetadata addon (`movie::mdblist.<id>`).
+//   2. an `addonCatalog` through the user's AIOMetadata addon (`movie::mdblist.<id>`), if it has the list, else
+//   3. an `addonCatalog` from our Worker's keyless MDBList addon (sync-worker/src/mdblist.js).
 
 import { IMG, cleanKey } from './tmdb.js'
+
+const SYNC_URL = (import.meta.env.VITE_SYNC_URL ?? '').replace(/\/+$/, '')
 
 const API = 'https://api.mdblist.com'
 
@@ -48,7 +51,27 @@ export async function searchLists(query, key) {
 }
 
 export async function topLists(key) {
-  return (await mdb('/lists/top', { limit: 40 }, key)).map((l) => toList(l))
+  return (await mdb('/lists/top', { limit: 100 }, key)).map((l) => toList(l))
+}
+
+// MDBList has no category endpoint, so categories are keyword searches merged together.
+export const CATEGORIES = {
+  streaming: ['Netflix', 'Disney+', 'Prime Video', 'Max', 'Hulu', 'Apple TV+', 'Paramount+', 'Peacock', 'Crunchyroll'],
+  studios: ['Marvel', 'Pixar', 'DreamWorks', 'Warner Bros', 'A24', 'Lucasfilm', 'Studio Ghibli', 'Blumhouse', 'Universal'],
+}
+
+/** Searches several terms (one API call each), de-duplicated by list id. */
+export async function searchMany(terms, key) {
+  const results = await Promise.all(terms.map((t) => searchLists(t, key).catch(() => [])))
+  const seen = new Map()
+  for (const l of results.flat()) if (!seen.has(l.id)) seen.set(l.id, l)
+  return [...seen.values()]
+}
+
+export const SORTS = {
+  popular: (a, b) => (b.likes ?? 0) - (a.likes ?? 0) || (b.count ?? 0) - (a.count ?? 0),
+  items: (a, b) => (b.count ?? 0) - (a.count ?? 0),
+  name: (a, b) => a.name.localeCompare(b.name),
 }
 
 // Accepts "username", "mdblist.com/lists/user/slug", or a numeric list id.
@@ -108,13 +131,22 @@ export async function sourcesForList(list, { traktClientId, aiometadata }) {
       payload: { addonId: aiometadata.url, catalogId: `${type}::mdblist.${list.id}`, type, catalogType: type },
     }))
     const missingInAddon = sources.some((s) => !aiometadata.catalogIds?.has(s.payload.catalogId))
-    return { sources, via: 'aiometadata', missingInAddon }
+    if (!missingInAddon) return { sources, via: 'aiometadata', missingInAddon }
   }
 
-  throw new Error(
-    `“${list.name}” isn't on Trakt${traktClientId ? '' : ' (or no Trakt Client ID set)'}, and no AIOMetadata addon is set. ` +
-      'Add your AIOMetadata manifest URL in Settings to use any MDBList list.',
-  )
+  // No setup needed: our Worker serves the public list as a Stremio addon.
+  if (SYNC_URL && list.owner && list.slug) {
+    const types = catalogTypes(list.mediatype)
+    const q = new URLSearchParams({ name: list.name, types: types.join(',') })
+    const addonId = `${SYNC_URL}/mdblist/${encodeURIComponent(list.owner)}/${encodeURIComponent(list.slug)}/manifest.json?${q}`
+    const sources = types.map((type) => ({
+      kind: 'addonCatalog',
+      payload: { addonId, catalogId: `${type}::list`, type, catalogType: type },
+    }))
+    return { sources, via: 'mdblist', missingInAddon: false }
+  }
+
+  throw new Error(`Couldn't turn “${list.name}” into a Fusion source (list has no owner/slug).`)
 }
 
 /** AIOMetadata "catalogs only" import file for lists that aren't in the user's addon yet. */

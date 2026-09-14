@@ -1,3 +1,5 @@
+import { mdblistAddon } from './mdblist.js'
+
 // Zero-knowledge sync store for Covers. The browser encrypts everything with a key derived from
 // the user's sync token; this Worker only ever sees an opaque id, a hash of a write secret, and
 // ciphertext. No accounts, no logging, no analytics.
@@ -139,7 +141,8 @@ async function githubAuth(req, env, url) {
   return new Response('Not found', { status: 404 })
 }
 
-async function handle(req, env) {
+async function handle(req, env, ctx) {
+  if (new URL(req.url).pathname.startsWith('/mdblist/')) return mdblistAddon(new URL(req.url), ctx)
   if (new URL(req.url).pathname.startsWith('/auth/github/')) return githubAuth(req, env, new URL(req.url))
   const h = cors(req, env)
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: h })
@@ -217,9 +220,9 @@ async function handle(req, env) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     try {
-      return await handle(req, env)
+      return await handle(req, env, ctx)
     } catch {
       return json({ error: 'unavailable' }, 503, { ...cors(req, env), 'Retry-After': '3600' })
     }

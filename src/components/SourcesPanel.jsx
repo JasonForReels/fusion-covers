@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { loadManifest, loadTraktLists, loadTraktPopular } from '../lib/sources.js'
-import { myLists, topLists, loadMdblistQuery, sourcesForList, mdblistPosters, aiometadataImportFile } from '../lib/mdblist.js'
+import { myLists, topLists, userLists, searchMany, CATEGORIES, SORTS, loadMdblistQuery, sourcesForList, mdblistPosters, aiometadataImportFile } from '../lib/mdblist.js'
 import { useToast } from './Toast.jsx'
 
 export default function SourcesPanel({ settings, setSettings, onAddCover, onAttach, openSettings }) {
@@ -182,12 +182,26 @@ function MdblistTab({ settings, onAddCover, onAttach, openSettings }) {
   const [title, setTitle] = useState('')
   const [busy, setBusy] = useState(false)
   const [pendingImport, setPendingImport] = useState(null)
+  const [browse, setBrowse] = useState('search') // search | streaming | studios | users
+  const [filter, setFilter] = useState('')
+  const [mediatype, setMediatype] = useState('')
+  const [owner, setOwner] = useState('')
+  const [sort, setSort] = useState('popular')
   const key = settings.mdblistKey
+
+  const owners = lists ? [...new Set(lists.map((l) => l.owner).filter(Boolean))].sort((a, b) => a.localeCompare(b)) : []
+  const shown = (lists ?? [])
+    .filter((l) => !mediatype || (mediatype === 'mixed' ? !['movie', 'show'].includes(l.mediatype) : l.mediatype === mediatype))
+    .filter((l) => !owner || l.owner === owner)
+    .filter((l) => `${l.name} ${l.owner}`.toLowerCase().includes(filter.trim().toLowerCase()))
+    .sort(SORTS[sort])
 
   async function run(fn) {
     setBusy(true)
     try {
       setLists(await fn())
+      setOwner('')
+      setFilter('')
     } catch (e) {
       toast(e.message, true)
     } finally {
@@ -247,7 +261,7 @@ function MdblistTab({ settings, onAddCover, onAttach, openSettings }) {
           },
         })
       } else onAttach(all)
-      const parts = [`${viaTrakt} via Trakt`, `${picked.size - viaTrakt} via AIOMetadata`].filter((p) => !p.startsWith('0 '))
+      const parts = [`${viaTrakt} via Trakt`, `${picked.size - viaTrakt} via addon`].filter((p) => !p.startsWith('0 '))
       toast(`${all.length} source${all.length > 1 ? 's' : ''} (${parts.join(', ')})${missing.length ? ' — some need adding to AIOMetadata' : ''}`, missing.length > 0)
       setPicked(new Map())
       setTitle('')
@@ -273,18 +287,41 @@ function MdblistTab({ settings, onAddCover, onAttach, openSettings }) {
 
   return (
     <section>
-      <form onSubmit={(e) => { e.preventDefault(); if (query.trim()) run(() => loadMdblistQuery(query, key)) }}>
-        <label>Username, list URL, or search
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="disney plus  ·  mdblist.com/lists/…" autoComplete="off" spellCheck={false} />
-        </label>
-        <div className="row3">
-          <button className="primary" disabled={busy}>Find</button>
-          <button type="button" className="ghost" disabled={busy} onClick={() => run(() => myLists(key))}>My lists</button>
-          <button type="button" className="ghost" disabled={busy} onClick={() => run(() => topLists(key))}>Top</button>
+      <div className="tabs sub" role="tablist">
+        {[['search', 'Search'], ['streaming', 'Streaming'], ['studios', 'Studios'], ['users', 'Users']].map(([id, label]) => (
+          <button key={id} role="tab" aria-selected={browse === id} className={`tab ${browse === id ? 'active' : ''}`} onClick={() => setBrowse(id)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {(browse === 'search' || browse === 'users') && (
+        <form onSubmit={(e) => {
+          e.preventDefault()
+          const q = query.trim()
+          if (q) run(() => (browse === 'users' ? userLists(q.replace(/^@/, ''), key) : loadMdblistQuery(q, key)))
+        }}>
+          <label>{browse === 'users' ? 'MDBList username' : 'Username, list URL, or search'}
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={browse === 'users' ? 'e.g. garycrawfordgc' : 'disney plus  ·  mdblist.com/lists/…'} autoComplete="off" spellCheck={false} />
+          </label>
+          <div className="row3">
+            <button className="primary" disabled={busy}>{browse === 'users' ? 'Load user' : 'Find'}</button>
+            <button type="button" className="ghost" disabled={busy} onClick={() => run(() => myLists(key))}>My lists</button>
+            <button type="button" className="ghost" disabled={busy} onClick={() => run(() => topLists(key))}>Most popular</button>
+          </div>
+          {browse === 'users' && <p className="hint">Load “Most popular” and use the curator filter below to browse by user.</p>}
+        </form>
+      )}
+
+      {CATEGORIES[browse] && (
+        <div className="chips">
+          <button className="chip" disabled={busy} onClick={() => run(() => searchMany(CATEGORIES[browse], key))}>
+            All {browse === 'studios' ? 'studios' : 'services'}
+          </button>
+          {CATEGORIES[browse].map((name) => (
+            <button key={name} className="chip" disabled={busy} onClick={() => run(() => searchMany([name], key))}>{name}</button>
+          ))}
         </div>
-      </form>
-      {!settings.aiometadataUrl && (
-        <p className="hint">Tip: add your AIOMetadata manifest in Settings so lists that aren't on Trakt work too.</p>
       )}
 
       {picked.size > 0 && (
@@ -309,8 +346,32 @@ function MdblistTab({ settings, onAddCover, onAttach, openSettings }) {
 
       {lists && (
         <div className="results">
-          {!lists.length && <p className="hint">No lists found.</p>}
-          {lists.map((l) => (
+          {lists.length > 0 && (
+            <div className="filters">
+              <input placeholder="Filter lists…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+              <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">
+                <option value="popular">Most popular</option>
+                <option value="items">Most items</option>
+                <option value="name">A–Z</option>
+              </select>
+              <select value={mediatype} onChange={(e) => setMediatype(e.target.value)} aria-label="Type">
+                <option value="">All types</option>
+                <option value="movie">Movies</option>
+                <option value="show">Shows</option>
+                <option value="mixed">Mixed</option>
+              </select>
+              {owners.length > 1 && (
+                <select value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Curator">
+                  <option value="">All curators ({owners.length})</option>
+                  {owners.map((o) => <option key={o} value={o}>@{o}</option>)}
+                </select>
+              )}
+            </div>
+          )}
+          {busy && <p className="hint">Loading…</p>}
+          {!shown.length && <p className="hint">No lists found.</p>}
+          {lists.length > 0 && shown.length !== lists.length && <div className="group">{shown.length} of {lists.length} lists</div>}
+          {shown.map((l) => (
             <label key={l.key} className={`result pick ${picked.has(l.id) ? 'on' : ''}`}>
               <input type="checkbox" checked={picked.has(l.id)} onChange={() => toggle(l)} />
               <span>
