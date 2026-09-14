@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
+import { imageLogoForBrand } from '../lib/logos.js'
 import { ASPECTS, describeSource, defaultDesign, newLogo } from '../lib/fusion.js'
 import LogoPicker from './LogoPicker.jsx'
 import BrandPicker from './BrandPicker.jsx'
@@ -163,7 +164,11 @@ export default function Editor({ item, patch, onRemove, onDuplicate, onClose, se
                 busy={busy}
                 settings={settings}
                 onPick={fillFromBrand}
-                onUseLogo={() => setD({ logo: { ...newLogo(), ...(d.logo ?? {}), preset: '', src: IMG(d.brand.logo, 'w500'), tint: d.brand.kind === 'provider' ? 'original' : 'white', scale: d.brand.kind === 'provider' ? 0.7 : 1 } })}
+                onUseLogo={() => {
+                  const own = imageLogoForBrand(d.brand)
+                  if (own) return setD({ logo: { ...newLogo(), ...(d.logo ?? {}), preset: own.id, src: '', tint: own.defaultTint ?? 'original' } })
+                  setD({ logo: { ...newLogo(), ...(d.logo ?? {}), preset: '', src: IMG(d.brand.logo, 'w500'), tint: d.brand.kind === 'provider' ? 'original' : 'white', scale: d.brand.kind === 'provider' ? 0.7 : 1 } })
+                }}
                 hasCatalog={['addonCatalog', 'traktList'].includes(item.dataSources[0]?.kind)}
                 onCatalog={fillFromCatalog}
               />
